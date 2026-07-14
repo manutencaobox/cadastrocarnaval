@@ -2,14 +2,35 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Escola } from '../lib/types'
 
-export function useEscola(slug: string | undefined) {
+// Extrai o slug do subdomínio:
+//   mox.cadastrocarnaval.com.br  → 'mox'
+//   www.cadastrocarnaval.com.br  → null (landing page)
+//   cadastrocarnaval.vercel.app  → null (3 partes)
+//   localhost                    → null (dev; use ?escola=mox)
+export function getSlugFromHostname(): string | null {
+  const hostname = window.location.hostname
+  const parts = hostname.split('.')
+
+  if (parts.length >= 4 && parts[0] !== 'www') {
+    return parts[0]
+  }
+
+  // Dev local: permite simular subdomínio com ?escola=mox
+  const params = new URLSearchParams(window.location.search)
+  return params.get('escola')
+}
+
+// Carrega a escola pelo slug informado ou, na ausência dele, pelo
+// subdomínio atual. Sem slug e sem subdomínio → contexto global
+// (landing), sem erro.
+export function useEscola(slugParam?: string) {
+  const slug = slugParam ?? getSlugFromHostname() ?? undefined
   const [escola, setEscola] = useState<Escola | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!!slug)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!slug) {
-      setError('Escola não encontrada.')
       setLoading(false)
       return
     }
