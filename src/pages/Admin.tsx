@@ -18,31 +18,39 @@ type AdminContext = {
 function useAdminAuth() {
   const [ctx, setCtx] = useState<AdminContext | null>(null)
   const [loading, setLoading] = useState(true)
+  const [semEscola, setSemEscola] = useState(false)
 
   useEffect(() => {
     async function load() {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) { setLoading(false); return }
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
 
-      const { data: usuario } = await supabase
-        .from('usuarios_admin')
-        .select('*, escola:escolas(*)')
-        .eq('user_id', session.user.id)
-        .eq('ativo', true)
-        .single()
+        const { data: usuario } = await supabase
+          .from('usuarios_admin')
+          .select('*, escola:escolas(*)')
+          .eq('user_id', session.user.id)
+          .eq('ativo', true)
+          .single()
 
-      if (usuario) {
-        const escola = (usuario as any).escola as Escola
-        document.documentElement.style.setProperty('--cor-primaria', escola.cor_primaria)
-        document.documentElement.style.setProperty('--cor-secundaria', escola.cor_secundaria)
-        setCtx({ usuario, escola, perfil: usuario.perfil })
+        if (usuario) {
+          const escola = (usuario as any).escola as Escola | null
+          if (!escola) {
+            setSemEscola(true)
+            return
+          }
+          document.documentElement.style.setProperty('--cor-primaria', escola.cor_primaria ?? '#CC0000')
+          document.documentElement.style.setProperty('--cor-secundaria', escola.cor_secundaria ?? '#C9A84C')
+          setCtx({ usuario, escola, perfil: usuario.perfil })
+        }
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
     load()
   }, [])
 
-  return { ctx, loading }
+  return { ctx, loading, semEscola }
 }
 
 // ─── CSS INLINE HELPERS ──────────────────────────────────────
@@ -1160,12 +1168,28 @@ export function AdminLogin() {
 
 export default function Admin() {
   const navigate = useNavigate()
-  const { ctx, loading } = useAdminAuth()
+  const { ctx, loading, semEscola } = useAdminAuth()
 
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh' }}>
       <div style={{ width:36, height:36, border:'3px solid #eee', borderTopColor:'var(--cor-primaria,#CC0000)', borderRadius:'50%', animation:'spin 0.8s linear infinite' }}/>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
+
+  if (semEscola) return (
+    <div style={{ minHeight:'100vh', background:'#f5f5f5', display:'flex', alignItems:'center', justifyContent:'center', padding:20, fontFamily:'system-ui,sans-serif' }}>
+      <div style={{ background:'white', borderRadius:16, padding:'40px 36px', maxWidth:440, textAlign:'center', boxShadow:'0 4px 16px rgba(0,0,0,0.08)' }}>
+        <div style={{ fontSize:40, marginBottom:16 }}>🏫</div>
+        <h2 style={{ margin:'0 0 10px', fontSize:20, fontWeight:700, color:'#1a1a1a' }}>Usuário sem escola vinculada</h2>
+        <p style={{ margin:'0 0 24px', fontSize:14, color:'#666', lineHeight:1.6 }}>
+          Este usuário não está vinculado a nenhuma escola. Se você é desenvolvedor, use o painel de gestão geral.
+        </p>
+        <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
+          <button onClick={()=>navigate('/superadmin')} style={btn('#CC0000')}>🔧 Ir para /superadmin</button>
+          <button onClick={async()=>{ await supabase.auth.signOut(); navigate('/admin/login') }} style={btn('#f0f0f0','#666')}>🚪 Sair</button>
+        </div>
+      </div>
     </div>
   )
 
