@@ -638,7 +638,7 @@ function Links({ ctx }: { ctx: AdminContext }) {
 
   const load = useCallback(async () => {
     const [{ data: ls }, { data: ps }, { data: fs }] = await Promise.all([
-      supabase.from('links_cadastro').select('*, posicionamento:posicionamentos(nome), funcao:funcoes(nome)').eq('escola_id', ctx.escola.id).order('criado_em', { ascending: false }),
+      supabase.from('links_cadastro').select('*, posicionamento:posicionamentos(nome), funcao:funcoes(nome), cpfs:cpfs_autorizados(count)').eq('escola_id', ctx.escola.id).order('criado_em', { ascending: false }),
       supabase.from('posicionamentos').select('*').eq('escola_id', ctx.escola.id).eq('ativo', true).order('nome'),
       supabase.from('funcoes').select('*').eq('ativo', true).order('ordem'),
     ])
@@ -793,7 +793,7 @@ function Links({ ctx }: { ctx: AdminContext }) {
                   <td style={td}><div style={{ fontWeight:500 }}>{l.descricao || '—'}</div></td>
                   <td style={{ ...td, fontSize:13, color:'#666' }}>{l.posicionamento?.nome}</td>
                   <td style={{ ...td, fontSize:13, color:'#666' }}>{l.funcao?.nome}</td>
-                  <td style={td}>{l.total_cadastros}</td>
+                  <td style={td}>{l.cpfs?.[0]?.count ?? 0}</td>
                   <td style={td}>{l.total_cadastros}</td>
                   <td style={td}><span style={badge(st.color, st.bg)}>{st.label}</span></td>
                   <td style={td}>

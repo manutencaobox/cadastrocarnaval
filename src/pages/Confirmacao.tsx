@@ -63,7 +63,7 @@ export default function Confirmacao() {
         </div>
 
         <div style={{ background:'#f0fff4', border:'1px solid #9ae6b4', borderRadius:10, padding:'14px 18px', color:'#276749', fontSize:13, lineHeight:1.6 }}>
-          Em breve o responsável da sua alegoria entrará em contato pelo WhatsApp cadastrado.
+          Em breve o responsável do seu setor entrará em contato pelo WhatsApp cadastrado.
         </div>
       </div>
 

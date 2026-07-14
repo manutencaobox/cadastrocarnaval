@@ -393,3 +393,30 @@ INSERT INTO posicionamentos (escola_id, tipo, nome) VALUES
   ((SELECT id FROM escolas WHERE slug='mox'), 'bateria', 'Bateria'),
   ((SELECT id FROM escolas WHERE slug='mox'), 'carro_som', 'Carro de Som'),
   ((SELECT id FROM escolas WHERE slug='mox'), 'geral', 'Geral');
+
+-- ─── Trigger pós-cadastro ────────────────────────────────────────
+-- O cliente anônimo não tem permissão de UPDATE em links_cadastro /
+-- cpfs_autorizados (RLS). Este trigger roda como SECURITY DEFINER e
+-- cuida do contador do link e da marcação do CPF após cada INSERT.
+CREATE OR REPLACE FUNCTION pos_cadastro()
+RETURNS TRIGGER
+SECURITY DEFINER
+SET search_path = public
+LANGUAGE plpgsql AS $fn$
+BEGIN
+  IF NEW.link_token_origem IS NOT NULL THEN
+    UPDATE links_cadastro
+       SET total_cadastros = total_cadastros + 1
+     WHERE link_token = NEW.link_token_origem;
+  END IF;
+  UPDATE cpfs_autorizados
+     SET cadastrado = true, cadastro_id = NEW.id
+   WHERE escola_id = NEW.escola_id AND cpf = NEW.cpf;
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS trg_pos_cadastro ON cadastros;
+CREATE TRIGGER trg_pos_cadastro
+  AFTER INSERT ON cadastros
+  FOR EACH ROW EXECUTE FUNCTION pos_cadastro();

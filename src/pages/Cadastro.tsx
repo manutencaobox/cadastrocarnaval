@@ -169,18 +169,9 @@ export default function Cadastro() {
 
       if (ie) throw ie
 
-      // Marca CPF como cadastrado
-      await supabase
-        .from('cpfs_autorizados')
-        .update({ cadastrado: true })
-        .eq('escola_id', escola!.id)
-        .eq('cpf', limparCPF(form.cpf))
-
-      // Incrementa contador do link
-      await supabase
-        .from('links_cadastro')
-        .update({ total_cadastros: (link!.total_cadastros || 0) + 1 })
-        .eq('id', link!.id)
+      // Marcação do CPF e incremento do contador do link são feitos
+      // por trigger no banco (trg_pos_cadastro) — o cliente anônimo
+      // não tem permissão de UPDATE nessas tabelas (RLS)
 
       const nome = form.nome_social || form.nome_registro
       navigate(`/confirmacao?` + new URLSearchParams({
