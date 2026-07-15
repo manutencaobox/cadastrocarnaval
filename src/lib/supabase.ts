@@ -7,7 +7,23 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no .env.local')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Sessão isolada por escola: cada subdomínio (ou ?escola= em dev) usa
+// uma chave própria no localStorage, evitando que o login de uma escola
+// vaze para o painel de outra no mesmo navegador.
+// (Duplicado de useEscola.getSlugFromHostname para evitar import circular.)
+function slugStorage(): string {
+  const parts = window.location.hostname.split('.')
+  if (parts.length >= 4 && parts[0] !== 'www') return parts[0]
+  return new URLSearchParams(window.location.search).get('escola') ?? 'global'
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storageKey: `sb-auth-${slugStorage()}`,
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+})
 
 // ─── Helpers de validação ───────────────────────
 

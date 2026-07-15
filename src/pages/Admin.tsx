@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Routes, Route, Navigate, NavLink, useNavigate, useParams } from 'react-router-dom'
 import { supabase, limparCPF, validarCPF, horasRestantes, linkExpirado } from '../lib/supabase'
+import { getSlugFromHostname } from '../hooks/useEscola'
 import type { Escola, Cadastro, Posicionamento, Funcao, LinkCadastro, CpfAutorizado, UsuarioAdmin } from '../lib/types'
 import { FUNCOES_BLOQUEADAS_USUARIO } from '../lib/types'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
@@ -37,6 +38,14 @@ function useAdminAuth() {
           const escola = (usuario as any).escola as Escola | null
           if (!escola) {
             setSemEscola(true)
+            return
+          }
+          // Sessão só vale no subdomínio da própria escola — se o usuário
+          // logado pertence a outra escola, encerra e volta ao login local
+          const slugAtual = getSlugFromHostname()
+          if (slugAtual && escola.slug !== slugAtual) {
+            await supabase.auth.signOut()
+            window.location.href = '/admin/login'
             return
           }
           document.documentElement.style.setProperty('--cor-primaria', escola.cor_primaria ?? '#CC0000')
