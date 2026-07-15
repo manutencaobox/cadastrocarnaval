@@ -486,6 +486,21 @@ function DetalheEscola({ escola, onClose }: { escola: Escola; onClose: () => voi
   const [admins, setAdmins] = useState<UsuarioAdmin[]>([])
   const [stats, setStats] = useState({ cadastros: 0, cpfs: 0, posicionamentos: 0, links: 0 })
   const [funcoesAtivas, setFuncoesAtivas] = useState<{ nome: string; categoria: string }[] | null>(null)
+  const [gerandoConvite, setGerandoConvite] = useState(false)
+
+  async function gerarConvite() {
+    setGerandoConvite(true)
+    const { data, error } = await supabase
+      .from('convites_admin')
+      .insert({ escola_id: escola.id, perfil: 'administrador' })
+      .select('token')
+      .single()
+    setGerandoConvite(false)
+    if (error || !data) { alert('Erro ao gerar convite: ' + (error?.message ?? '')); return }
+    const link = `https://www.cadastrocarnaval.com.br/convite/${data.token}`
+    try { await navigator.clipboard.writeText(link) } catch { /* clipboard pode falhar sem foco */ }
+    alert('Link de convite copiado (válido por 7 dias):\n\n' + link)
+  }
 
   useEffect(() => {
     async function load() {
@@ -588,7 +603,12 @@ function DetalheEscola({ escola, onClose }: { escola: Escola; onClose: () => voi
 
           {/* Admins */}
           <div>
-            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#aaa', marginBottom: 10 }}>Usuários admin ({admins.length})</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#aaa' }}>Usuários admin ({admins.length})</div>
+              <button onClick={gerarConvite} disabled={gerandoConvite} style={{ background: escola.cor_primaria, color: 'white', border: 'none', borderRadius: 7, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: gerandoConvite ? 0.6 : 1 }}>
+                {gerandoConvite ? 'Gerando...' : '🔗 Gerar link de convite'}
+              </button>
+            </div>
             {admins.map(a => (
               <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 12px', background: '#f8f8f8', borderRadius: 8, marginBottom: 6, fontSize: 13 }}>
                 <div>

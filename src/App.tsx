@@ -5,6 +5,7 @@ import Admin, { AdminLogin } from './pages/Admin'
 import SuperAdmin, { SuperAdminLogin } from './pages/SuperAdmin'
 import AjudaMedidas from './pages/AjudaMedidas'
 import EscolaHome from './pages/EscolaHome'
+import Convite from './pages/Convite'
 import { getSlugFromHostname, useEscola } from './hooks/useEscola'
 
 // Placeholders
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="/"                   element={slugEscola ? <EscolaHome /> : <Landing />} />
         <Route path="/cadastro/:token"    element={<Cadastro />} />
         <Route path="/confirmacao"        element={<Confirmacao />} />
+        <Route path="/convite/:token"     element={<Convite />} />
         <Route path="/ajuda/medidas"      element={<AjudaMedidas />} />
         <Route path="/admin/login"        element={<AdminLogin />} />
         <Route path="/admin/*"            element={<Admin />} />

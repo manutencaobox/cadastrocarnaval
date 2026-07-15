@@ -459,3 +459,74 @@ CREATE POLICY "publico_select_escola_funcoes" ON escola_funcoes
   FOR SELECT USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_escola_funcoes_escola ON escola_funcoes(escola_id);
+
+-- ─── Convites de admin por link ──────────────────────────────────
+-- O token do convite é o segredo; a tabela NÃO tem leitura pública.
+-- O fluxo público usa as RPCs convite_info / aceitar_convite
+-- (SECURITY DEFINER), que operam apenas sobre o token informado.
+CREATE TABLE IF NOT EXISTS convites_admin (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  escola_id   UUID NOT NULL REFERENCES escolas(id) ON DELETE CASCADE,
+  token       TEXT UNIQUE NOT NULL DEFAULT gen_random_uuid()::TEXT,
+  email       TEXT,
+  perfil      TEXT NOT NULL DEFAULT 'administrador',
+  criado_por  UUID REFERENCES usuarios_admin(id),
+  criado_em   TIMESTAMPTZ DEFAULT NOW(),
+  expira_em   TIMESTAMPTZ DEFAULT NOW() + INTERVAL '7 days',
+  usado_em    TIMESTAMPTZ,
+  usado_por   UUID REFERENCES auth.users(id)
+);
+
+ALTER TABLE convites_admin ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "gestor_select_convites" ON convites_admin
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM usuarios_admin ua
+      WHERE ua.user_id = auth.uid()
+        AND (ua.perfil = 'desenvolvedor' OR ua.escola_id = convites_admin.escola_id)
+    )
+  );
+
+CREATE POLICY "gestor_insert_convites" ON convites_admin
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM usuarios_admin ua
+      WHERE ua.user_id = auth.uid()
+        AND (ua.perfil = 'desenvolvedor'
+             OR (ua.perfil = 'administrador' AND ua.escola_id = convites_admin.escola_id))
+    )
+  );
+
+CREATE OR REPLACE FUNCTION convite_info(p_token text)
+RETURNS TABLE (escola_nome text, logo_url text, cor_primaria text, cor_secundaria text, expira_em timestamptz, status text)
+SECURITY DEFINER SET search_path = public LANGUAGE plpgsql AS $fn$
+DECLARE c convites_admin%ROWTYPE;
+BEGIN
+  SELECT * INTO c FROM convites_admin WHERE token = p_token;
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT NULL::text, NULL::text, NULL::text, NULL::text, NULL::timestamptz, 'nao_encontrado'::text;
+    RETURN;
+  END IF;
+  RETURN QUERY
+  SELECT e.nome, e.logo_url, e.cor_primaria, e.cor_secundaria, c.expira_em,
+         CASE WHEN c.usado_em IS NOT NULL THEN 'usado'
+              WHEN c.expira_em < NOW() THEN 'expirado'
+              ELSE 'valido' END
+    FROM escolas e WHERE e.id = c.escola_id;
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION aceitar_convite(p_token text, p_nome text, p_user_id uuid, p_email text)
+RETURNS void SECURITY DEFINER SET search_path = public LANGUAGE plpgsql AS $fn$
+DECLARE c convites_admin%ROWTYPE;
+BEGIN
+  SELECT * INTO c FROM convites_admin WHERE token = p_token FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Convite nao encontrado'; END IF;
+  IF c.usado_em IS NOT NULL THEN RAISE EXCEPTION 'Convite ja utilizado'; END IF;
+  IF c.expira_em < NOW() THEN RAISE EXCEPTION 'Convite expirado'; END IF;
+  INSERT INTO usuarios_admin (user_id, escola_id, nome, email, perfil, setor_tipo)
+  VALUES (p_user_id, c.escola_id, p_nome, p_email, c.perfil, 'todos');
+  UPDATE convites_admin SET usado_em = NOW(), usado_por = p_user_id WHERE id = c.id;
+END;
+$fn$;
