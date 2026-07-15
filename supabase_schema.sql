@@ -499,17 +499,17 @@ CREATE POLICY "gestor_insert_convites" ON convites_admin
   );
 
 CREATE OR REPLACE FUNCTION convite_info(p_token text)
-RETURNS TABLE (escola_nome text, logo_url text, cor_primaria text, cor_secundaria text, expira_em timestamptz, status text)
+RETURNS TABLE (escola_nome text, escola_slug text, logo_url text, cor_primaria text, cor_secundaria text, expira_em timestamptz, status text)
 SECURITY DEFINER SET search_path = public LANGUAGE plpgsql AS $fn$
 DECLARE c convites_admin%ROWTYPE;
 BEGIN
   SELECT * INTO c FROM convites_admin WHERE token = p_token;
   IF NOT FOUND THEN
-    RETURN QUERY SELECT NULL::text, NULL::text, NULL::text, NULL::text, NULL::timestamptz, 'nao_encontrado'::text;
+    RETURN QUERY SELECT NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, NULL::timestamptz, 'nao_encontrado'::text;
     RETURN;
   END IF;
   RETURN QUERY
-  SELECT e.nome, e.logo_url, e.cor_primaria, e.cor_secundaria, c.expira_em,
+  SELECT e.nome, e.slug, e.logo_url, e.cor_primaria, e.cor_secundaria, c.expira_em,
          CASE WHEN c.usado_em IS NOT NULL THEN 'usado'
               WHEN c.expira_em < NOW() THEN 'expirado'
               ELSE 'valido' END

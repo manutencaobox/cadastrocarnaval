@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 
 type ConviteInfo = {
   escola_nome: string | null
+  escola_slug: string | null
   logo_url: string | null
   cor_primaria: string | null
   cor_secundaria: string | null
@@ -34,8 +35,31 @@ export default function Convite() {
     load()
   }, [token])
 
-  const cor1 = info?.cor_primaria ?? '#1A1A1A'
-  const cor2 = info?.cor_secundaria ?? '#C9A84C'
+  // Aplica cores e título da escola assim que o convite carrega
+  useEffect(() => {
+    if (!info?.escola_nome) return
+    if (info.cor_primaria) document.documentElement.style.setProperty('--cor-primaria', info.cor_primaria)
+    if (info.cor_secundaria) document.documentElement.style.setProperty('--cor-secundaria', info.cor_secundaria)
+    document.title = `Criar conta — ${info.escola_nome}`
+  }, [info])
+
+  const cor1 = info?.cor_primaria ?? 'var(--cor-primaria, #1A1A1A)'
+  const cor2 = info?.cor_secundaria ?? 'var(--cor-secundaria, #C9A84C)'
+
+  // Leva ao painel no contexto certo da escola:
+  // produção → subdomínio (mangueira.cadastrocarnaval.com.br);
+  // localhost/vercel.app → query param ?escola=slug
+  function irParaPainel(path: '/admin/dashboard' | '/admin/login') {
+    const slug = info?.escola_slug
+    const hostname = window.location.hostname
+    if (!slug || hostname === 'localhost' || hostname.endsWith('vercel.app')) {
+      navigate(`${path}${slug ? `?escola=${slug}` : ''}`)
+      return
+    }
+    const parts = hostname.split('.')
+    const base = parts.length >= 4 ? parts.slice(1).join('.') : hostname.replace(/^www\./, '')
+    window.location.href = `https://${slug}.${base}${path}`
+  }
 
   async function criarConta(e: React.FormEvent) {
     e.preventDefault()
@@ -75,7 +99,7 @@ export default function Convite() {
       }
 
       if (auth.session) {
-        navigate('/admin/dashboard')
+        irParaPainel('/admin/dashboard')
       } else {
         // Projeto com confirmação de e-mail ligada: sem sessão imediata
         setContaCriada(true)
@@ -104,7 +128,7 @@ export default function Convite() {
           <h1 style={{ fontSize:20, margin:'0 0 10px' }}>Convite indisponível</h1>
           <p style={{ color:'#888', fontSize:14, lineHeight:1.6 }}>{msgs[info?.status ?? 'nao_encontrado']}</p>
           {info?.status === 'usado' && (
-            <button onClick={()=>navigate('/admin/login')} style={{ marginTop:16, background:'#1A1A1A', color:'white', border:'none', borderRadius:8, padding:'11px 22px', fontSize:14, fontWeight:600, cursor:'pointer' }}>Ir para o login</button>
+            <button onClick={()=>irParaPainel('/admin/login')} style={{ marginTop:16, background:'#1A1A1A', color:'white', border:'none', borderRadius:8, padding:'11px 22px', fontSize:14, fontWeight:600, cursor:'pointer' }}>Ir para o login</button>
           )}
         </div>
       </div>
@@ -121,7 +145,7 @@ export default function Convite() {
             Enviamos um e-mail de confirmação para <strong>{form.email}</strong>.
             Confirme e depois entre no painel.
           </p>
-          <button onClick={()=>navigate('/admin/login')} style={{ marginTop:16, background:cor1, color:'white', border:'none', borderRadius:8, padding:'12px 24px', fontSize:14, fontWeight:600, cursor:'pointer' }}>Ir para o login</button>
+          <button onClick={()=>irParaPainel('/admin/login')} style={{ marginTop:16, background:cor1, color:'white', border:'none', borderRadius:8, padding:'12px 24px', fontSize:14, fontWeight:600, cursor:'pointer' }}>Ir para o login</button>
         </div>
       </div>
     )
