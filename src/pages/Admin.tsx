@@ -750,6 +750,13 @@ function Links({ ctx }: { ctx: AdminContext }) {
       {criando && (
         <div style={{ ...card, padding:24, marginBottom:24 }}>
           <h3 style={{ margin:'0 0 20px', fontSize:16 }}>Novo link de cadastro</h3>
+          {posicionamentos.length === 0 && (
+            <div style={{ background:'#FFF9E6', border:'1px solid #F5E1A4', borderRadius:10, padding:'12px 16px', fontSize:13, color:'#8a6d1a', marginBottom:14 }}>
+              Sua escola ainda não tem posicionamentos cadastrados.{' '}
+              <NavLink to="/admin/estrutura" style={{ color:'#8a6d1a', fontWeight:700 }}>Monte a estrutura do desfile</NavLink>{' '}
+              antes de criar links.
+            </div>
+          )}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
             <div>
               <label style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#888', display:'block', marginBottom:5 }}>Posicionamento *</label>

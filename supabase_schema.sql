@@ -530,3 +530,28 @@ BEGIN
   UPDATE convites_admin SET usado_em = NOW(), usado_por = p_user_id WHERE id = c.id;
 END;
 $fn$;
+
+-- ─── Estrutura inicial de escola nova ────────────────────────────
+-- Toda escola criada ganha posicionamentos padrão e todas as
+-- funções do catálogo ativas (o admin ajusta depois no painel).
+CREATE OR REPLACE FUNCTION seed_estrutura_escola()
+RETURNS TRIGGER SECURITY DEFINER SET search_path = public LANGUAGE plpgsql AS $fn$
+BEGIN
+  INSERT INTO posicionamentos (escola_id, tipo, numero, nome, ativo) VALUES
+    (NEW.id, 'geral', NULL, 'Geral', true),
+    (NEW.id, 'comissao_frente', NULL, 'Comissão de Frente', true),
+    (NEW.id, 'bateria', NULL, 'Bateria', true),
+    (NEW.id, 'carro_som', NULL, 'Carro de Som', true),
+    (NEW.id, 'ala', 1, 'Ala 1', true),
+    (NEW.id, 'alegoria', 1, 'Alegoria 1', true);
+  INSERT INTO escola_funcoes (escola_id, funcao_id, ativo)
+  SELECT NEW.id, id, true FROM funcoes WHERE ativo = true
+  ON CONFLICT DO NOTHING;
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS trg_seed_estrutura ON escolas;
+CREATE TRIGGER trg_seed_estrutura
+  AFTER INSERT ON escolas
+  FOR EACH ROW EXECUTE FUNCTION seed_estrutura_escola();
