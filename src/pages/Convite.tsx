@@ -24,6 +24,9 @@ export default function Convite() {
   const [erro, setErro] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [contaCriada, setContaCriada] = useState(false)
+  const [linkPainel, setLinkPainel] = useState('')
+  const [precisaConfirmarEmail, setPrecisaConfirmarEmail] = useState(false)
+  const [linkCopiado, setLinkCopiado] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -98,12 +101,26 @@ export default function Convite() {
         return
       }
 
-      if (auth.session) {
-        irParaPainel('/admin/dashboard')
+      // Monta o link fixo e memorável do painel da escola:
+      // produção → https://{slug}.cadastrocarnaval.com.br/admin
+      // localhost/vercel.app → {origin}/admin/dashboard?escola={slug}
+      const slug = info?.escola_slug ?? ''
+      const hostname = window.location.hostname
+      let link: string
+      if (hostname === 'localhost' || hostname.includes('vercel.app')) {
+        link = `${window.location.origin}/admin/dashboard?escola=${slug}`
       } else {
-        // Projeto com confirmação de e-mail ligada: sem sessão imediata
-        setContaCriada(true)
+        // Base robusta: se já estamos num subdomínio (4+ partes), remove a 1ª;
+        // senão só tira o www. — evita gerar slug.slug.dominio
+        const parts = hostname.split('.')
+        const base = parts.length >= 4 ? parts.slice(1).join('.') : hostname.replace(/^www\./, '')
+        link = `https://${slug}.${base}/admin`
       }
+
+      setLinkPainel(link)
+      setPrecisaConfirmarEmail(!auth.session)
+      setContaCriada(true)
+      // NÃO redireciona — mostra a tela de sucesso com o link fixo
     } catch {
       setErro('Erro inesperado. Tente novamente.')
     } finally {
@@ -136,16 +153,77 @@ export default function Convite() {
   }
 
   if (contaCriada) {
+    const copiarLink = () => {
+      navigator.clipboard?.writeText(linkPainel)
+        .then(() => { setLinkCopiado(true); setTimeout(() => setLinkCopiado(false), 3000) })
+        .catch(() => { window.prompt('Copie o link do painel:', linkPainel) })
+    }
+
     return (
-      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:20, fontFamily:'system-ui,sans-serif', textAlign:'center', background:cor1 }}>
-        <div style={{ background:'white', borderRadius:12, padding:'36px 32px', maxWidth:440 }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>✅</div>
-          <h1 style={{ fontSize:20, margin:'0 0 10px' }}>Conta criada!</h1>
-          <p style={{ color:'#666', fontSize:14, lineHeight:1.7 }}>
-            Enviamos um e-mail de confirmação para <strong>{form.email}</strong>.
-            Confirme e depois entre no painel.
-          </p>
-          <button onClick={()=>irParaPainel('/admin/login')} style={{ marginTop:16, background:cor1, color:'white', border:'none', borderRadius:8, padding:'12px 24px', fontSize:14, fontWeight:600, cursor:'pointer' }}>Ir para o login</button>
+      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#f5f5f5', fontFamily:'system-ui,sans-serif' }}>
+        <div style={{ maxWidth:420, width:'100%', padding:'0 20px' }}>
+
+          {/* Header com cor da escola */}
+          <div style={{ background:cor1, borderRadius:'12px 12px 0 0', padding:'32px 24px', textAlign:'center' }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>✅</div>
+            <div style={{ color:cor2, fontWeight:800, fontSize:20 }}>
+              Conta criada com sucesso!
+            </div>
+          </div>
+
+          {/* Corpo */}
+          <div style={{ background:'white', borderRadius:'0 0 12px 12px', padding:28, boxShadow:'0 4px 16px rgba(0,0,0,0.10)' }}>
+
+            <p style={{ textAlign:'center', color:'#555', marginBottom:20 }}>
+              Seu acesso ao painel da <strong>{info.escola_nome}</strong> é sempre por aqui:
+            </p>
+
+            {/* Link destacado */}
+            <div style={{ background:'#f8f8f8', border:`2px solid ${cor1}`, borderRadius:10, padding:'14px 16px', textAlign:'center', marginBottom:8, wordBreak:'break-all', fontWeight:700, fontSize:15, color:cor1 }}>
+              🔗 {linkPainel.replace('https://', '')}
+            </div>
+
+            <p style={{ textAlign:'center', fontSize:13, color:'#aaa', marginBottom: precisaConfirmarEmail ? 12 : 24 }}>
+              💡 Salve este link nos seus favoritos para acessar sempre
+            </p>
+
+            {/* Aviso de confirmação de e-mail (quando o projeto exige) */}
+            {precisaConfirmarEmail && (
+              <div style={{ background:'#FEF9C3', color:'#854D0E', borderRadius:10, padding:'11px 14px', fontSize:13, lineHeight:1.6, marginBottom:20, textAlign:'center' }}>
+                ✉️ Enviamos um e-mail de confirmação para <strong>{form.email}</strong>.
+                Confirme antes do primeiro acesso.
+              </div>
+            )}
+
+            {/* Botões */}
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+
+              <button
+                onClick={copiarLink}
+                style={{ background: linkCopiado ? '#DCFCE7' : '#f0f0f0', color: linkCopiado ? '#166534' : '#444', border:'none', borderRadius:10, padding:'13px', fontSize:15, fontWeight:600, cursor:'pointer' }}>
+                {linkCopiado ? '✅ Link copiado!' : '📋 Copiar link'}
+              </button>
+
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(`Meu painel do CadastroCarnaval:\n${linkPainel}`)}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ background:'#25D366', color:'white', borderRadius:10, padding:'13px', fontSize:15, fontWeight:600, textAlign:'center', textDecoration:'none' }}>
+                📲 Enviar para meu WhatsApp
+              </a>
+
+              <a
+                href={linkPainel}
+                style={{ background:cor1, color:cor2 || 'white', borderRadius:10, padding:'13px', fontSize:15, fontWeight:700, textAlign:'center', textDecoration:'none' }}>
+                → Acessar o painel agora
+              </a>
+
+            </div>
+          </div>
+
+          <div style={{ textAlign:'center', marginTop:16, fontSize:12, color:'#ccc' }}>
+            cadastrocarnaval.com.br
+          </div>
         </div>
       </div>
     )
