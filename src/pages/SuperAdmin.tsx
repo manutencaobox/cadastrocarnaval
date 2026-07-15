@@ -485,18 +485,26 @@ function GestaoEscolas() {
 function DetalheEscola({ escola, onClose }: { escola: Escola; onClose: () => void }) {
   const [admins, setAdmins] = useState<UsuarioAdmin[]>([])
   const [stats, setStats] = useState({ cadastros: 0, cpfs: 0, posicionamentos: 0, links: 0 })
+  const [funcoesAtivas, setFuncoesAtivas] = useState<{ nome: string; categoria: string }[] | null>(null)
 
   useEffect(() => {
     async function load() {
-      const [{ data: adms }, { count: cad }, { count: cpf }, { count: pos }, { count: lnk }] = await Promise.all([
+      const [{ data: adms }, { count: cad }, { count: cpf }, { count: pos }, { count: lnk }, { data: ef }] = await Promise.all([
         supabase.from('usuarios_admin').select('*').eq('escola_id', escola.id),
         supabase.from('cadastros').select('*', { count: 'exact', head: true }).eq('escola_id', escola.id),
         supabase.from('cpfs_autorizados').select('*', { count: 'exact', head: true }).eq('escola_id', escola.id),
         supabase.from('posicionamentos').select('*', { count: 'exact', head: true }).eq('escola_id', escola.id),
         supabase.from('links_cadastro').select('*', { count: 'exact', head: true }).eq('escola_id', escola.id),
+        supabase.from('escola_funcoes').select('ativo, funcao:funcoes(nome, categoria)').eq('escola_id', escola.id).eq('ativo', true),
       ])
       setAdmins((adms ?? []) as UsuarioAdmin[])
       setStats({ cadastros: cad ?? 0, cpfs: cpf ?? 0, posicionamentos: pos ?? 0, links: lnk ?? 0 })
+      // Escola sem configuração em escola_funcoes = todas as funções (null indica fallback)
+      setFuncoesAtivas(
+        ef && ef.length > 0
+          ? ef.map((e: any) => e.funcao).filter(Boolean)
+          : null
+      )
     }
     load()
   }, [escola.id])
@@ -555,6 +563,27 @@ function DetalheEscola({ escola, onClose }: { escola: Escola; onClose: () => voi
                 {escola.cor_secundaria}
               </div>
             </div>
+          </div>
+
+          {/* Funções ativas */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#aaa', marginBottom: 10 }}>
+              Funções ativas {funcoesAtivas ? `(${funcoesAtivas.length})` : '(todas — sem configuração própria)'}
+            </div>
+            {funcoesAtivas ? (
+              [...new Set(funcoesAtivas.map(f => f.categoria))].map(cat => (
+                <div key={cat} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{cat.replace('_', ' ')}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {funcoesAtivas.filter(f => f.categoria === cat).map(f => (
+                      <span key={f.nome} style={{ background: '#f0f0f0', borderRadius: 20, padding: '4px 12px', fontSize: 12, color: '#555' }}>{f.nome}</span>
+                    ))}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: 13, color: '#aaa' }}>A escola usa todas as funções do catálogo global.</div>
+            )}
           </div>
 
           {/* Admins */}

@@ -637,17 +637,24 @@ function Links({ ctx }: { ctx: AdminContext }) {
   const [copiado, setCopiado] = useState<string|null>(null)
 
   const load = useCallback(async () => {
-    const [{ data: ls }, { data: ps }, { data: fs }] = await Promise.all([
+    const [{ data: ls }, { data: ps }, { data: fs }, { data: efAtivas }] = await Promise.all([
       supabase.from('links_cadastro').select('*, posicionamento:posicionamentos(nome), funcao:funcoes(nome), cpfs:cpfs_autorizados(count)').eq('escola_id', ctx.escola.id).order('criado_em', { ascending: false }),
       supabase.from('posicionamentos').select('*').eq('escola_id', ctx.escola.id).eq('ativo', true).order('nome'),
       supabase.from('funcoes').select('*').eq('ativo', true).order('ordem'),
+      supabase.from('escola_funcoes').select('funcao_id, ativo').eq('escola_id', ctx.escola.id),
     ])
     setLinks((ls ?? []) as any)
     setPosicionamentos((ps ?? []) as any)
+    // Funções ativas para esta escola; escola sem configuração = todas (retrocompatibilidade)
+    let fsEscola = (fs ?? []) as any[]
+    if (efAtivas && efAtivas.length > 0) {
+      const ativas = new Set(efAtivas.filter((ef: any) => ef.ativo).map((ef: any) => ef.funcao_id))
+      fsEscola = fsEscola.filter((f: any) => ativas.has(f.id))
+    }
     // Filtra funções bloqueadas para usuário
     const fsFilt = ctx.perfil === 'usuario'
-      ? (fs ?? []).filter((f: any) => !FUNCOES_BLOQUEADAS_USUARIO.includes(f.nome))
-      : (fs ?? [])
+      ? fsEscola.filter((f: any) => !FUNCOES_BLOQUEADAS_USUARIO.includes(f.nome))
+      : fsEscola
     setFuncoes(fsFilt as any)
   }, [ctx.escola.id, ctx.perfil])
 
@@ -1044,6 +1051,114 @@ function Usuarios({ ctx }: { ctx: AdminContext }) {
 // ─── CONFIGURAÇÕES ────────────────────────────────────────────
 
 function Configuracoes({ ctx }: { ctx: AdminContext }) {
+  const [aba, setAba] = useState<'geral' | 'funcoes'>('geral')
+
+  const tabBtn = (ativa: boolean): React.CSSProperties => ({
+    padding: '9px 20px', borderRadius: 8, border: 'none', cursor: 'pointer',
+    fontSize: 14, fontWeight: 600,
+    background: ativa ? 'var(--cor-primaria,#CC0000)' : '#f0f0f0',
+    color: ativa ? 'white' : '#666',
+  })
+
+  return (
+    <div>
+      <h2 style={{ margin:'0 0 18px', fontSize:22, fontWeight:700 }}>Configurações da escola</h2>
+      <div style={{ display:'flex', gap:8, marginBottom:22 }}>
+        <button onClick={()=>setAba('geral')} style={tabBtn(aba==='geral')}>Geral</button>
+        <button onClick={()=>setAba('funcoes')} style={tabBtn(aba==='funcoes')}>Funções</button>
+      </div>
+      {aba === 'geral' ? <ConfigGeral ctx={ctx}/> : <ConfigFuncoes ctx={ctx}/>}
+    </div>
+  )
+}
+
+function ConfigFuncoes({ ctx }: { ctx: AdminContext }) {
+  const CATEGORIAS = [
+    { val: 'ala', label: '📍 Ala' },
+    { val: 'alegoria', label: '🎭 Alegoria' },
+    { val: 'bateria', label: '🥁 Bateria' },
+    { val: 'carro_som', label: '🎤 Carro de Som' },
+    { val: 'comissao', label: '⭐ Comissão de Frente' },
+    { val: 'geral', label: '🏫 Geral' },
+  ]
+  const [catalogo, setCatalogo] = useState<Funcao[]>([])
+  const [ativas, setAtivas] = useState<Record<string, boolean>>({})
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      const [{ data: todasFuncoes }, { data: efData }] = await Promise.all([
+        supabase.from('funcoes').select('*').eq('ativo', true).order('categoria').order('ordem'),
+        supabase.from('escola_funcoes').select('funcao_id, ativo').eq('escola_id', ctx.escola.id),
+      ])
+      const map: Record<string, boolean> = {}
+      if (efData && efData.length > 0) {
+        // Funções sem registro ficam como ativas por padrão
+        ;(todasFuncoes ?? []).forEach((f: any) => { map[f.id] = true })
+        efData.forEach((ef: any) => { map[ef.funcao_id] = ef.ativo })
+      } else {
+        // Escola sem configuração ainda → todas ativas (retrocompatibilidade)
+        ;(todasFuncoes ?? []).forEach((f: any) => { map[f.id] = true })
+      }
+      setCatalogo((todasFuncoes ?? []) as any)
+      setAtivas(map)
+      setLoading(false)
+    }
+    load()
+  }, [ctx.escola.id])
+
+  async function toggleFuncao(funcaoId: string, ativo: boolean) {
+    setAtivas(prev => ({ ...prev, [funcaoId]: ativo }))
+    const { error } = await supabase.from('escola_funcoes').upsert({
+      escola_id: ctx.escola.id,
+      funcao_id: funcaoId,
+      ativo,
+    }, { onConflict: 'escola_id,funcao_id' })
+    if (error) {
+      setAtivas(prev => ({ ...prev, [funcaoId]: !ativo }))
+      alert('Não foi possível salvar. Tente novamente.')
+    }
+  }
+
+  if (loading) return <div style={{ color:'#aaa', padding:20 }}>Carregando...</div>
+
+  const totalAtivas = catalogo.filter(f => ativas[f.id]).length
+
+  return (
+    <div style={{ maxWidth:560 }}>
+      <div style={{ background:'#FFF9E6', border:'1px solid #F5E1A4', borderRadius:10, padding:'12px 16px', fontSize:13, color:'#8a6d1a', marginBottom:18 }}>
+        Ative apenas as funções que a sua escola usa — só elas aparecem na criação de links de cadastro.
+        <strong> {totalAtivas} de {catalogo.length} ativas.</strong>
+      </div>
+      {CATEGORIAS.map(cat => {
+        const fns = catalogo.filter(f => f.categoria === cat.val)
+        if (fns.length === 0) return null
+        return (
+          <div key={cat.val} style={{ ...card, padding:0, marginBottom:14, overflow:'hidden' }}>
+            <div style={{ background:'var(--cor-primaria,#CC0000)', color:'white', padding:'10px 18px', fontWeight:700, fontSize:14 }}>{cat.label}</div>
+            {fns.map(f => {
+              const on = !!ativas[f.id]
+              return (
+                <div key={f.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'11px 18px', borderBottom:'1px solid #f5f5f5' }}>
+                  <span style={{ fontSize:14, color: on ? '#222' : '#aaa' }}>{f.nome}</span>
+                  <button
+                    onClick={() => toggleFuncao(f.id, !on)}
+                    title={on ? 'Desativar' : 'Ativar'}
+                    style={{ width:44, height:24, borderRadius:12, border:'none', cursor:'pointer', position:'relative', transition:'background 0.15s', background: on ? '#16A34A' : '#d4d4d4' }}
+                  >
+                    <span style={{ position:'absolute', top:3, left: on ? 23 : 3, width:18, height:18, borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 3px rgba(0,0,0,0.25)' }}/>
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ConfigGeral({ ctx }: { ctx: AdminContext }) {
   const [form, setForm] = useState({ nome: ctx.escola.nome, cor_primaria: ctx.escola.cor_primaria, cor_secundaria: ctx.escola.cor_secundaria })
   const [saving, setSaving] = useState(false)
   const [logoFile, setLogoFile] = useState<File|null>(null)
@@ -1067,7 +1182,6 @@ function Configuracoes({ ctx }: { ctx: AdminContext }) {
 
   return (
     <div style={{ maxWidth:560 }}>
-      <h2 style={{ margin:'0 0 24px', fontSize:22, fontWeight:700 }}>Configurações da escola</h2>
       <div style={{ ...card, padding:28, display:'flex', flexDirection:'column', gap:20 }}>
 
         <div>

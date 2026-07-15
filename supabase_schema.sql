@@ -420,3 +420,42 @@ DROP TRIGGER IF EXISTS trg_pos_cadastro ON cadastros;
 CREATE TRIGGER trg_pos_cadastro
   AFTER INSERT ON cadastros
   FOR EACH ROW EXECUTE FUNCTION pos_cadastro();
+
+-- ─── Funções por escola ──────────────────────────────────────────
+-- Cada escola ativa as funções do catálogo global que deseja usar.
+-- Sem registros para uma escola = todas as funções ativas (fallback).
+CREATE TABLE IF NOT EXISTS escola_funcoes (
+  escola_id UUID NOT NULL REFERENCES escolas(id) ON DELETE CASCADE,
+  funcao_id UUID NOT NULL REFERENCES funcoes(id) ON DELETE CASCADE,
+  ativo     BOOLEAN NOT NULL DEFAULT true,
+  criado_em TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (escola_id, funcao_id)
+);
+
+ALTER TABLE escola_funcoes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "admin_select_escola_funcoes" ON escola_funcoes
+  FOR SELECT USING (
+    escola_id IN (SELECT escola_id FROM usuarios_admin WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "admin_insert_escola_funcoes" ON escola_funcoes
+  FOR INSERT WITH CHECK (
+    escola_id IN (
+      SELECT escola_id FROM usuarios_admin
+      WHERE user_id = auth.uid() AND perfil IN ('administrador', 'desenvolvedor')
+    )
+  );
+
+CREATE POLICY "admin_update_escola_funcoes" ON escola_funcoes
+  FOR UPDATE USING (
+    escola_id IN (
+      SELECT escola_id FROM usuarios_admin
+      WHERE user_id = auth.uid() AND perfil IN ('administrador', 'desenvolvedor')
+    )
+  );
+
+CREATE POLICY "publico_select_escola_funcoes" ON escola_funcoes
+  FOR SELECT USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_escola_funcoes_escola ON escola_funcoes(escola_id);

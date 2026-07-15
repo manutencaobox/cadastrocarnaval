@@ -78,6 +78,15 @@ export type LinkCadastro = {
   funcao?: Funcao
 }
 
+// Vínculo escola ↔ função do catálogo global.
+// Escola sem registros aqui = todas as funções ativas (fallback).
+export type EscolaFuncao = {
+  escola_id: string
+  funcao_id: string
+  ativo: boolean
+  criado_em: string
+}
+
 export type CpfAutorizado = {
   id: string
   link_id: string
