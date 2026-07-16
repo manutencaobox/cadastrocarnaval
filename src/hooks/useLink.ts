@@ -47,6 +47,7 @@ export function useLink(token: string | undefined): UseLinkResult {
         return
       }
 
+      // expira_em NULL = link permanente; datas passadas só valem para links antigos
       if (linkExpirado(data.expira_em)) {
         setErro('Este link expirou. Solicite um novo ao seu responsável.')
         setLoading(false)

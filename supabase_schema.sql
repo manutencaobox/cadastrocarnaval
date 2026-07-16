@@ -555,3 +555,40 @@ DROP TRIGGER IF EXISTS trg_seed_estrutura ON escolas;
 CREATE TRIGGER trg_seed_estrutura
   AFTER INSERT ON escolas
   FOR EACH ROW EXECUTE FUNCTION seed_estrutura_escola();
+
+-- ─── Links permanentes + lista de CPFs viva ──────────────────────
+-- Link não expira mais por padrão (expira_em NULL = permanente);
+-- o admin encerra manualmente (ativo=false). CPF é único por link,
+-- podendo aparecer em listas de links diferentes.
+ALTER TABLE links_cadastro ALTER COLUMN expira_em DROP DEFAULT;
+
+ALTER TABLE cpfs_autorizados DROP CONSTRAINT IF EXISTS cpfs_autorizados_escola_id_cpf_key;
+ALTER TABLE cpfs_autorizados ADD CONSTRAINT cpfs_autorizados_link_id_cpf_key UNIQUE (link_id, cpf);
+
+-- Gestão de links e CPFs pelo painel (UPDATE/DELETE faltavam)
+CREATE POLICY "gestor_update_links" ON links_cadastro
+  FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM usuarios_admin ua WHERE ua.user_id = auth.uid()
+            AND (ua.perfil = 'desenvolvedor' OR ua.escola_id = links_cadastro.escola_id))
+  );
+
+CREATE POLICY "gestor_delete_links" ON links_cadastro
+  FOR DELETE USING (
+    EXISTS (SELECT 1 FROM usuarios_admin ua WHERE ua.user_id = auth.uid()
+            AND (ua.perfil = 'desenvolvedor' OR ua.escola_id = links_cadastro.escola_id))
+  );
+
+CREATE POLICY "gestor_delete_cpfs" ON cpfs_autorizados
+  FOR DELETE USING (
+    EXISTS (SELECT 1 FROM usuarios_admin ua WHERE ua.user_id = auth.uid()
+            AND (ua.perfil = 'desenvolvedor' OR ua.escola_id = cpfs_autorizados.escola_id))
+  );
+
+-- Fotos dos componentes: upload e leitura públicos no bucket
+CREATE POLICY "upload_publico_fotos" ON storage.objects
+  FOR INSERT TO anon, authenticated
+  WITH CHECK (bucket_id = 'fotos-componentes');
+
+CREATE POLICY "leitura_publica_fotos" ON storage.objects
+  FOR SELECT TO anon, authenticated
+  USING (bucket_id = 'fotos-componentes');

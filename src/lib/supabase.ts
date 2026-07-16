@@ -56,11 +56,14 @@ export function cpfMascaradoExibicao(cpf: string): string {
   return `***.***.${c.slice(6, 9)}-**`
 }
 
-export function linkExpirado(expira_em: string): boolean {
+// expira_em NULL = link permanente (nunca expira)
+export function linkExpirado(expira_em: string | null): boolean {
+  if (!expira_em) return false
   return new Date(expira_em) < new Date()
 }
 
-export function horasRestantes(expira_em: string): number {
+export function horasRestantes(expira_em: string | null): number {
+  if (!expira_em) return 0
   const diff = new Date(expira_em).getTime() - Date.now()
   return Math.max(0, Math.ceil(diff / 3600000))
 }

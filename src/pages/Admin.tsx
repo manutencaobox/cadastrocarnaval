@@ -1,7 +1,30 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Routes, Route, Navigate, NavLink, useNavigate, useParams } from 'react-router-dom'
-import { supabase, limparCPF, validarCPF, horasRestantes, linkExpirado } from '../lib/supabase'
+import { supabase, limparCPF, validarCPF } from '../lib/supabase'
 import { getSlugFromHostname } from '../hooks/useEscola'
+import * as XLSX from 'xlsx'
+
+// ─── LEITURA DE CPFs DE ARQUIVO (CSV/TXT/Excel) ───────────────
+
+function extrairCpfs(texto: string): string[] {
+  const cpfs = texto
+    .split(/[\n,;\t\r ]/)
+    .map(c => limparCPF(c.trim()))
+    .filter(c => c.length === 11 && validarCPF(c))
+  return [...new Set(cpfs)]
+}
+
+async function lerCpfsDoArquivo(file: File): Promise<string[]> {
+  // CSV e TXT — leitura direta
+  if (/\.(csv|txt)$/i.test(file.name)) {
+    return extrairCpfs(await file.text())
+  }
+  // Excel — SheetJS (todas as abas)
+  const buffer = await file.arrayBuffer()
+  const wb = XLSX.read(buffer, { type: 'array' })
+  const texto = wb.SheetNames.map(n => XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n')
+  return extrairCpfs(texto)
+}
 import type { Escola, Cadastro, Posicionamento, Funcao, LinkCadastro, CpfAutorizado, UsuarioAdmin } from '../lib/types'
 import { FUNCOES_BLOQUEADAS_USUARIO } from '../lib/types'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
@@ -267,8 +290,8 @@ function Dashboard({ ctx }: { ctx: AdminContext }) {
                   <div style={{ fontWeight: 500 }}>{l.posicionamento?.nome}</div>
                   <div style={{ color: '#888', fontSize: 12 }}>{l.funcao?.nome}</div>
                 </div>
-                <div style={{ color: horasRestantes(l.expira_em) <= 6 ? '#e53e3e' : '#888', fontSize: 12, textAlign: 'right' }}>
-                  {horasRestantes(l.expira_em)}h restantes
+                <div style={{ color: '#888', fontSize: 12, textAlign: 'right' }}>
+                  {l.total_cadastros ?? 0} cadastros
                 </div>
               </div>
             ))
@@ -643,7 +666,10 @@ function Links({ ctx }: { ctx: AdminContext }) {
   const [criando, setCriando] = useState(false)
   const [form, setForm] = useState({ posicionamento_id:'', funcao_id:'', descricao:'' })
   const [cpfsTexto, setCpfsTexto] = useState('')
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [cpfsDetectados, setCpfsDetectados] = useState<string[]>([])
   const [copiado, setCopiado] = useState<string|null>(null)
+  const [gerenciando, setGerenciando] = useState<LinkCadastro | null>(null)
 
   const load = useCallback(async () => {
     const [{ data: ls }, { data: ps }, { data: fs }, { data: efAtivas }] = await Promise.all([
@@ -669,35 +695,50 @@ function Links({ ctx }: { ctx: AdminContext }) {
 
   useEffect(() => { load() }, [load])
 
+  async function handleArquivo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setArquivo(file)
+    try {
+      setCpfsDetectados(await lerCpfsDoArquivo(file))
+    } catch {
+      alert('Não foi possível ler o arquivo. Use CSV, TXT ou Excel.')
+      setArquivo(null)
+      setCpfsDetectados([])
+    }
+  }
+
+  function limparForm() {
+    setForm({ posicionamento_id:'', funcao_id:'', descricao:'' })
+    setCpfsTexto('')
+    setArquivo(null)
+    setCpfsDetectados([])
+  }
+
   async function criarLink() {
     if (!form.posicionamento_id || !form.funcao_id) return alert('Selecione posicionamento e função.')
-    const cpfs = cpfsTexto.split(/[\n,;]/).map(c=>limparCPF(c.trim())).filter(c=>c.length===11 && validarCPF(c))
-    if (cpfs.length === 0) return alert('Adicione pelo menos um CPF válido.')
+    const cpfsDoTexto = extrairCpfs(cpfsTexto)
+    const todosCpfs = [...new Set([...cpfsDetectados, ...cpfsDoTexto])]
+    if (todosCpfs.length === 0) return alert('Adicione pelo menos um CPF válido.')
 
-    const { data: link } = await supabase.from('links_cadastro').insert({
+    const { data: link, error } = await supabase.from('links_cadastro').insert({
       escola_id: ctx.escola.id,
       posicionamento_id: form.posicionamento_id,
       funcao_id: form.funcao_id,
       descricao: form.descricao || null,
+      expira_em: null, // link permanente — encerra manualmente
       criado_por: ctx.usuario.id,
     }).select().single()
 
-    if (link) {
-      await supabase.from('cpfs_autorizados').insert(
-        cpfs.map(cpf => ({ link_id: link.id, escola_id: ctx.escola.id, cpf }))
-      )
-    }
+    if (error || !link) { alert('Erro ao criar o link.'); return }
 
-    setForm({ posicionamento_id:'', funcao_id:'', descricao:'' })
-    setCpfsTexto('')
+    const { error: ce } = await supabase.from('cpfs_autorizados').insert(
+      todosCpfs.map(cpf => ({ link_id: link.id, escola_id: ctx.escola.id, cpf }))
+    )
+    if (ce) alert('Link criado, mas houve erro ao salvar parte dos CPFs: ' + ce.message)
+
+    limparForm()
     setCriando(false)
-    load()
-  }
-
-  async function renovar(link: LinkCadastro) {
-    const novoToken = crypto.randomUUID()
-    const novaExpiracao = new Date(Date.now() + 48*3600000).toISOString()
-    await supabase.from('links_cadastro').update({ link_token: novoToken, expira_em: novaExpiracao, ativo: true }).eq('id', link.id)
     load()
   }
 
@@ -721,14 +762,13 @@ function Links({ ctx }: { ctx: AdminContext }) {
 
   function whatsapp(link: any) {
     const url = `${window.location.origin}/cadastro/${link.link_token}`
-    const texto = `📋 *${ctx.escola.nome}*\nCadastro: ${link.posicionamento?.nome} · ${link.funcao?.nome}\n\n${link.descricao ? link.descricao+'\n\n' : ''}Acesse e preencha seus dados:\n${url}\n\n⏰ Link válido por 48 horas.`
+    const texto = `📋 *${ctx.escola.nome}*\nCadastro: ${link.posicionamento?.nome} · ${link.funcao?.nome}\n\n${link.descricao ? link.descricao+'\n\n' : ''}Acesse e preencha seus dados:\n${url}`
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`)
   }
 
   const statusLink = (l: LinkCadastro) => {
-    if (!l.ativo) return { label:'Pausado', color:'#666', bg:'#f0f0f0' }
-    if (linkExpirado(l.expira_em)) return { label:'Expirado', color:'#991B1B', bg:'#FEE2E2' }
-    return { label:`${horasRestantes(l.expira_em)}h`, color:'#065F46', bg:'#D1FAE5' }
+    if (!l.ativo) return { label:'Encerrado', color:'#666', bg:'#f0f0f0' }
+    return { label:'Ativo', color:'#065F46', bg:'#D1FAE5' }
   }
 
   return (
@@ -778,17 +818,43 @@ function Links({ ctx }: { ctx: AdminContext }) {
             <input value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} placeholder="Ex: Passistas da Ala 5" style={input}/>
           </div>
           <div style={{ marginBottom:20 }}>
-            <label style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#888', display:'block', marginBottom:5 }}>CPFs autorizados * <span style={{ color:'#aaa', fontWeight:400 }}>(um por linha, ou separados por vírgula)</span></label>
-            <textarea value={cpfsTexto} onChange={e=>setCpfsTexto(e.target.value)}
-              placeholder="123.456.789-00&#10;987.654.321-00&#10;..."
-              style={{ ...input, minHeight:120, resize:'vertical', fontFamily:'monospace' }}/>
-            <div style={{ fontSize:12, color:'#aaa', marginTop:4 }}>
-              {cpfsTexto.split(/[\n,;]/).map(c=>limparCPF(c.trim())).filter(c=>c.length===11).length} CPFs válidos detectados
-            </div>
+            <label style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#888', display:'block', marginBottom:5 }}>
+              Lista de CPFs autorizados *
+            </label>
+
+            <label style={{ display:'flex', alignItems:'center', gap:10, border:'2px dashed #ddd', borderRadius:8, padding:'14px 16px', cursor:'pointer', background:'#fafafa', marginBottom:8 }}>
+              <span style={{ fontSize:20 }}>📎</span>
+              <div>
+                <div style={{ fontWeight:600, fontSize:14 }}>{arquivo ? arquivo.name : 'Upload Excel ou CSV'}</div>
+                <div style={{ fontSize:12, color:'#aaa' }}>Clique para selecionar — o sistema encontra os CPFs automaticamente</div>
+              </div>
+              <input type="file" accept=".csv,.xlsx,.xls,.txt" style={{ display:'none' }} onChange={handleArquivo}/>
+            </label>
+
+            {cpfsDetectados.length > 0 && (
+              <div style={{ background:'#D1FAE5', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#065F46', marginBottom:8 }}>
+                ✅ {cpfsDetectados.length} CPFs válidos detectados no arquivo
+              </div>
+            )}
+            {arquivo && cpfsDetectados.length === 0 && (
+              <div style={{ background:'#FEE2E2', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#991B1B', marginBottom:8 }}>
+                Nenhum CPF válido encontrado no arquivo.
+              </div>
+            )}
+
+            <details style={{ marginTop:6 }}>
+              <summary style={{ fontSize:12, color:'#aaa', cursor:'pointer' }}>Ou digitar CPFs manualmente</summary>
+              <textarea value={cpfsTexto} onChange={e=>setCpfsTexto(e.target.value)}
+                placeholder="123.456.789-00&#10;987.654.321-00&#10;..."
+                style={{ ...input, minHeight:80, marginTop:8, fontFamily:'monospace', resize:'vertical' }}/>
+              <div style={{ fontSize:12, color:'#aaa', marginTop:4 }}>
+                {extrairCpfs(cpfsTexto).length} CPFs válidos digitados
+              </div>
+            </details>
           </div>
           <div style={{ display:'flex', gap:10 }}>
             <button onClick={criarLink} style={btn('var(--cor-primaria)')}>🔗 Gerar link</button>
-            <button onClick={()=>{ setCriando(false); setForm({posicionamento_id:'',funcao_id:'',descricao:''}); setCpfsTexto('') }} style={btn('#f0f0f0','#666')}>Cancelar</button>
+            <button onClick={()=>{ setCriando(false); limparForm() }} style={btn('#f0f0f0','#666')}>Cancelar</button>
           </div>
         </div>
       )}
@@ -825,8 +891,8 @@ function Links({ ctx }: { ctx: AdminContext }) {
                         {copiado===l.id ? '✓' : '📋'}
                       </button>
                       <button onClick={()=>whatsapp(l)} style={btn('#25D366')} title="WhatsApp">📲</button>
-                      <button onClick={()=>renovar(l)} style={btn('#EFF6FF','#1E40AF')} title="Renovar 48h">🔄</button>
-                      <button onClick={()=>pausar(l)} style={btn('#f0f0f0','#666')} title={l.ativo ? 'Pausar' : 'Reativar'}>
+                      <button onClick={()=>setGerenciando(l)} style={btn('#EFF6FF','#1E40AF')} title="Gerenciar lista de CPFs">👥</button>
+                      <button onClick={()=>pausar(l)} style={btn('#f0f0f0','#666')} title={l.ativo ? 'Encerrar cadastros' : 'Reabrir cadastros'}>
                         {l.ativo ? '⏸️' : '▶️'}
                       </button>
                       <button onClick={()=>excluirLink(l)} style={btn('#FEE2E2','#991B1B')} title="Excluir">🗑️</button>
@@ -837,6 +903,157 @@ function Links({ ctx }: { ctx: AdminContext }) {
             })}
           </tbody>
         </table>
+      </div>
+
+      {gerenciando && (
+        <GerenciarLista
+          ctx={ctx}
+          link={gerenciando}
+          onClose={() => { setGerenciando(null); load() }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── GERENCIAR LISTA DE CPFs DO LINK ─────────────────────────
+
+function GerenciarLista({ ctx, link, onClose }: { ctx: AdminContext; link: any; onClose: () => void }) {
+  const [cpfs, setCpfs] = useState<CpfAutorizado[]>([])
+  const [novoCpf, setNovoCpf] = useState('')
+  const [addManual, setAddManual] = useState(false)
+  const [ativo, setAtivo] = useState<boolean>(link.ativo)
+
+  const reload = useCallback(async () => {
+    const { data } = await supabase
+      .from('cpfs_autorizados')
+      .select('*')
+      .eq('link_id', link.id)
+      .order('cadastrado', { ascending: false })
+      .order('criado_em')
+    setCpfs((data ?? []) as any)
+  }, [link.id])
+
+  useEffect(() => { reload() }, [reload])
+
+  const cadastrados = cpfs.filter(c => c.cadastrado).length
+  const pendentes = cpfs.length - cadastrados
+
+  async function adicionarCpf(e: React.FormEvent) {
+    e.preventDefault()
+    const cpf = limparCPF(novoCpf)
+    if (cpf.length !== 11 || !validarCPF(cpf)) return alert('CPF inválido.')
+    if (cpfs.find(c => c.cpf === cpf)) return alert('Este CPF já está na lista.')
+    const { error } = await supabase.from('cpfs_autorizados').insert({
+      link_id: link.id, escola_id: ctx.escola.id, cpf,
+    })
+    if (error) { alert('Erro ao adicionar: ' + error.message); return }
+    setNovoCpf('')
+    reload()
+  }
+
+  async function adicionarViaArquivo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    let lidos: string[] = []
+    try { lidos = await lerCpfsDoArquivo(file) } catch { return alert('Não foi possível ler o arquivo.') }
+    const existentes = new Set(cpfs.map(c => c.cpf))
+    const novos = lidos.filter(c => !existentes.has(c))
+    if (novos.length === 0) return alert('Nenhum CPF novo encontrado no arquivo.')
+    const { error } = await supabase.from('cpfs_autorizados').insert(
+      novos.map(cpf => ({ link_id: link.id, escola_id: ctx.escola.id, cpf }))
+    )
+    if (error) { alert('Erro ao adicionar: ' + error.message); return }
+    alert(`${novos.length} CPFs adicionados à lista.`)
+    reload()
+  }
+
+  async function removerCpf(c: CpfAutorizado) {
+    if (c.cadastrado) return alert('Não é possível remover um CPF que já realizou o cadastro.')
+    if (!confirm(`Remover o CPF ${mascararLista(c.cpf)} da lista?`)) return
+    const { error } = await supabase.from('cpfs_autorizados').delete().eq('id', c.id)
+    if (error) { alert('Erro ao remover: ' + error.message); return }
+    reload()
+  }
+
+  async function alternarCadastros() {
+    const msg = ativo
+      ? 'Encerrar os cadastros deste link? Ninguém mais poderá se cadastrar.'
+      : 'Reabrir os cadastros deste link?'
+    if (!confirm(msg)) return
+    const { error } = await supabase.from('links_cadastro').update({ ativo: !ativo }).eq('id', link.id)
+    if (error) { alert('Erro: ' + error.message); return }
+    setAtivo(!ativo)
+  }
+
+  function mascararLista(cpf: string) {
+    return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', justifyContent:'flex-end', zIndex:300 }} onClick={onClose}>
+      <div style={{ background:'white', width:460, height:'100vh', overflow:'auto', boxShadow:'-4px 0 20px rgba(0,0,0,0.15)' }} onClick={e=>e.stopPropagation()}>
+        <div style={{ background:'var(--cor-primaria,#CC0000)', padding:'18px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', position:'sticky', top:0 }}>
+          <div>
+            <div style={{ color:'white', fontWeight:700, fontSize:15 }}>Lista de CPFs — {link.descricao || `${link.posicionamento?.nome} · ${link.funcao?.nome}`}</div>
+            <div style={{ color:'rgba(255,255,255,0.75)', fontSize:12, marginTop:2 }}>
+              {cpfs.length} CPFs · {cadastrados} cadastrados · {pendentes} pendentes
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'white', fontSize:20, cursor:'pointer' }}>✕</button>
+        </div>
+
+        <div style={{ padding:20, display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ display:'flex', gap:8 }}>
+            <label style={{ ...btn('#EFF6FF','#1E40AF'), cursor:'pointer', flex:1, textAlign:'center' }}>
+              📎 Adicionar via Excel/CSV
+              <input type="file" accept=".csv,.xlsx,.xls,.txt" style={{ display:'none' }} onChange={adicionarViaArquivo}/>
+            </label>
+            <button onClick={()=>setAddManual(a=>!a)} style={{ ...btn('#f0f0f0','#444'), flex:1 }}>+ Adicionar CPF avulso</button>
+          </div>
+
+          {addManual && (
+            <form onSubmit={adicionarCpf} style={{ display:'flex', gap:8 }}>
+              <input value={novoCpf} onChange={e=>setNovoCpf(e.target.value)} placeholder="000.000.000-00" autoFocus style={{ ...input, flex:1 }}/>
+              <button type="submit" style={btn('var(--cor-primaria)')}>Adicionar</button>
+            </form>
+          )}
+
+          <div style={{ ...card }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead><tr>
+                <th style={th}>Situação</th>
+                <th style={th}>CPF</th>
+                <th style={{ ...th, width:60 }}></th>
+              </tr></thead>
+              <tbody>
+                {cpfs.length === 0 && (
+                  <tr><td colSpan={3} style={{ ...td, textAlign:'center', color:'#aaa', padding:30 }}>Nenhum CPF na lista.</td></tr>
+                )}
+                {cpfs.map(c => (
+                  <tr key={c.id}>
+                    <td style={td}>
+                      {c.cadastrado
+                        ? <span style={badge('#065F46','#D1FAE5')}>✅ Cadastrado</span>
+                        : <span style={badge('#92400E','#FEF3C7')}>⏳ Pendente</span>}
+                    </td>
+                    <td style={{ ...td, fontFamily:'monospace', fontSize:13 }}>{mascararLista(c.cpf)}</td>
+                    <td style={td}>
+                      {!c.cadastrado && (
+                        <button onClick={()=>removerCpf(c)} style={btn('#FEE2E2','#991B1B')} title="Remover">🗑️</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <button onClick={alternarCadastros} style={{ ...btn(ativo ? '#FEE2E2' : '#D1FAE5', ativo ? '#991B1B' : '#065F46'), padding:'12px 18px', fontSize:14 }}>
+            {ativo ? '⏸️ Encerrar cadastros' : '▶️ Reabrir cadastros'}
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -70,7 +70,7 @@ export type LinkCadastro = {
   descricao: string | null
   criado_por: string
   criado_em: string
-  expira_em: string
+  expira_em: string | null
   ativo: boolean
   total_cadastros: number
   // joins
