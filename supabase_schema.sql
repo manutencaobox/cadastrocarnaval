@@ -592,3 +592,33 @@ CREATE POLICY "upload_publico_fotos" ON storage.objects
 CREATE POLICY "leitura_publica_fotos" ON storage.objects
   FOR SELECT TO anon, authenticated
   USING (bucket_id = 'fotos-componentes');
+
+-- ─── RLS nas tabelas de catálogo ─────────────────────────────────
+-- planos_config e funcoes: leitura pública, escrita só desenvolvedor.
+-- (convites_admin NÃO tem leitura/escrita pública — o fluxo público
+-- usa as RPCs convite_info/aceitar_convite; ver seção de convites.)
+ALTER TABLE planos_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE funcoes       ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "publico_select_planos" ON planos_config
+  FOR SELECT USING (true);
+
+CREATE POLICY "dev_all_planos" ON planos_config
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM usuarios_admin WHERE user_id = auth.uid() AND perfil = 'desenvolvedor')
+  );
+
+CREATE POLICY "publico_select_funcoes" ON funcoes
+  FOR SELECT USING (true);
+
+CREATE POLICY "dev_all_funcoes" ON funcoes
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM usuarios_admin WHERE user_id = auth.uid() AND perfil = 'desenvolvedor')
+  );
+
+CREATE POLICY "gestor_delete_escola_funcoes" ON escola_funcoes
+  FOR DELETE USING (
+    EXISTS (SELECT 1 FROM usuarios_admin ua WHERE ua.user_id = auth.uid()
+            AND (ua.perfil = 'desenvolvedor'
+                 OR (ua.perfil = 'administrador' AND ua.escola_id = escola_funcoes.escola_id)))
+  );
